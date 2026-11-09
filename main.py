@@ -74,12 +74,12 @@ class TitanAI_Analyst:
         ]
     }
     payload = {
-            "chat_id": target_chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-            "reply_markup": keyboard
-        }
-        requests.post(url, json=payload)
+        "chat_id": target_chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+        "reply_markup": keyboard
+    }
+    requests.post(url, json=payload)
 
     def get_market_session(self):
         now_utc = datetime.datetime.utcnow().hour
