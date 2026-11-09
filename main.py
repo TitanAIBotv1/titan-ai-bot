@@ -168,7 +168,7 @@ class TitanAI_Analyst:
         except Exception as e:
             print(f"Fehler in Polling Loop: {e}")
 
-        def run(self):
+    def run(self):
         print("Titan AI Bot gestartet und einsatzbereit...")
         if self.chat_id:
             self.send_message_with_buttons("🚀 Titan AI Bot ist jetzt LIVE & online!", self.chat_id)
