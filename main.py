@@ -55,23 +55,24 @@ class TitanAI_Analyst:
     def send_message_with_buttons(self, text: str, target_chat_id: str):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         
-        keyboard = {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Trade geöffnet", "callback_data": "trade_open"},
-                    {"text": "🎯 TP / Win erreicht", "callback_data": "trade_win"}
-                ],                [
-                    {"text": "🛡️ Break Even gezogen", "callback_data": "trade_be"}
-                ],
-                [
-                    {"text": "❌ Stop-Loss / Loss", "callback_data": "trade_loss"},
-                    {"text": "✏️ Manuell geschlossen", "callback_data": "trade_manual"}
-                ],
-                [
-                    {"text": "📊 Journal Statistik", "callback_data": "show_stats"}
-                ]
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Trade geöffnet", "callback_data": "trade_open"},
+                {"text": "🎯 TP / Win erreicht", "callback_data": "trade_win"}
+            ],
+            [
+                {"text": "🛡️ Break Even gezogen", "callback_data": "trade_be"}
+            ],
+            [
+                {"text": "❌ Stop-Loss / Loss", "callback_data": "trade_loss"},
+                {"text": "✍️ Manuell geschlossen", "callback_data": "trade_manual"}
+            ],
+            [
+                {"text": "📊 Journal Statistik", "callback_data": "show_stats"}
             ]
-        }
+        ]
+    }
         
         payload = {
             "chat_id": target_chat_id,
