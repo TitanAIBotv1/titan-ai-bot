@@ -73,8 +73,7 @@ class TitanAI_Analyst:
             ]
         ]
     }
-        
-        payload = {
+    payload = {
             "chat_id": target_chat_id,
             "text": text,
             "parse_mode": "Markdown",
