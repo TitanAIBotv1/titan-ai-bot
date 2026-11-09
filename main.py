@@ -1,5 +1,4 @@
-
-   import datetime
+import datetime
 import time
 import threading
 import io
@@ -442,3 +441,4 @@ if __name__ == "__main__":
 
     print("Alle Titan AI v3.0 Dienste aktiv...")
     analyst.listen()
+
