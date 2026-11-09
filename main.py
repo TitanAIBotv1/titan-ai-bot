@@ -8,17 +8,14 @@ import pandas as pd
 
 app = Flask(__name__)
 
-
 @app.route("/")
 def home():
     return "Titan AI Bot is running 24/7!"
 
-
 def run_flask():
     app.run(host="0.0.0.0", port=5000)
 
-
-TELEGRAM_TOKEN = "8878607953:AAGkBw5ENjKg27oewJI_IgtEzxu2giGav2s"
+TELEGRAM_TOKEN = "8878607953:AAHBXqy1Kpa485kYa70hkj_EfaJ_EtHrIYc"
 
 class TitanAI_Analyst:
     def __init__(self, risk_percentage: float = 1.0):
@@ -50,11 +47,11 @@ class TitanAI_Analyst:
             "parse_mode": "Markdown",
             "reply_markup": keyboard
         }
-        requests.post(url, json=payload)
+        res = requests.post(url, json=payload)
+        print(f"send_persistent_menu Status: {res.status_code}")
 
     def send_message_with_buttons(self, text: str, target_chat_id: str):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-       
         keyboard = {
             "inline_keyboard": [
                 [
@@ -71,14 +68,18 @@ class TitanAI_Analyst:
                 ]
             ]
         }
-       
         payload = {
             "chat_id": target_chat_id,
             "text": text,
             "parse_mode": "Markdown",
             "reply_markup": keyboard
         }
-        requests.post(url, json=payload)
+        res = requests.post(url, json=payload)
+        print(f"send_message_with_buttons Status: {res.status_code}")
+
+    def send_plain_message(self, text: str, target_chat_id: str):
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": target_chat_id, "text": text, "parse_mode": "Markdown"})
 
     def get_market_session(self):
         now_utc = datetime.datetime.utcnow().hour
@@ -94,22 +95,21 @@ class TitanAI_Analyst:
     def fetch_data(self, interval):
         df = pd.DataFrame()
         for symbol in ["GC=F", "XAUUSD=X"]:
-            for _ in range(2):
-                try:
-                    df = yf.download(symbol, interval=interval, period="5d", progress=False)
-                    if not df.empty:
-                        break
-                except Exception:
-                    pass
-                time.sleep(1)
-            if not df.empty:
-                break
+            try:
+                df = yf.download(symbol, interval=interval, period="5d", progress=False)
+                if not df.empty:
+                    print(f"Marktdaten erfolgreich geladen von {symbol}")
+                    break
+            except Exception as e:
+                print(f"Fehler bei yfinance Download ({symbol}): {e}")
+            time.sleep(1)
         return df
 
     def analyze_market(self, timeframe="15m"):
         df = self.fetch_data(timeframe)
         if df.empty:
-            return None
+            print("Fehler: Yahoo Finance hat leere Daten geliefert.")
+            return "⚠️ *Marktdaten konnten aktuell nicht geladen werden.* Bitte erneut versuchen."
 
         if isinstance(df.columns, tuple) or hasattr(df.columns, 'levels'):
             df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
@@ -131,7 +131,7 @@ class TitanAI_Analyst:
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         df['ATRr_14'] = tr.ewm(alpha=1/14, adjust=False).mean()
        
-        current = df.iloc[-2]
+        current = df.iloc[-1]
        
         price = round(float(current['Close']), 2)
         ema50 = float(current['EMA_50'])
@@ -192,7 +192,7 @@ class TitanAI_Analyst:
             f"• *TP4:* `{tp4:.2f}`\n"
             f"• *TP5:* `{tp5:.2f}`\n"
             f"• *🏆 Golden Profit (TP6):* `{tp6:.2f}`\n\n"
-            f"⚖️ *Disclaimer:* Dies ist eine rein algorithmische Marktanalyse und keine Anlageberatung oder Handelsempfehlung."
+            f"⚖️ *Disclaimer:* Dies ist eine rein algorithmische Marktanalyse und keine Handelsempfehlung."
         )
 
     def handle_callback(self, callback_query):
@@ -217,7 +217,7 @@ class TitanAI_Analyst:
             answer_text = "🛡️ Break-Even vermerkt! Stopp liegt auf Einstieg."
         elif data == "trade_manual":
             self.waiting_for_close_price[chat_id] = True
-            answer_text = "Bitte antworte jetzt im Chat mit deinem geschlossenen Exit-Preis (z.B. 4102.50)."
+            answer_text = "Bitte antworte jetzt im Chat mit deinem geschlossenen Exit-Preis."
         elif data == "show_stats":
             self.send_stats_report(chat_id)
 
@@ -231,52 +231,21 @@ class TitanAI_Analyst:
             f"• Wins: `{self.journal['wins']}` | Losses: `{self.journal['losses']}`\n"
             f"• Netto Pips / Punkte: `{self.journal['total_pips']:.1f}`"
         )
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                      json={"chat_id": chat_id, "text": stats_msg, "parse_mode": "Markdown"})
+        self.send_plain_message(stats_msg, chat_id)
 
     def listen(self):
-        print("Titan AI (inkl. automatischer Update-Nachricht) gestartet...")
-        startup_notified = False
-
+        print("Titan AI Polling Loop gestartet...")
         while True:
             try:
-                now = datetime.datetime.utcnow()
-                current_week = now.isocalendar()[1]
-
-                if not startup_notified and self.last_active_chat_id:
-                    update_announcement = (
-                        "🚀 *TITAN AI – UPDATE ONLINE!* 🚀\n\n"
-                        "Moin Leute! Es wurde soeben ein neues Update eingespielt:\n"
-                        "• ✨ **Trend-Status integriert**\n"
-                        "• 🎛️ **Permanentes Steuerungs-Menü** unten im Chat\n"
-                        "• 🛡️ **Break-Even Funktion** für laufende Trades\n"
-                        "• 📊 **Optimiertes Journal & Wochenrückblick**\n\n"
-                        "Tippt einfach einmal auf **`/start`** unten im Chat, um loszulegen!"
-                    )
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                                  json={"chat_id": self.last_active_chat_id, "text": update_announcement, "parse_mode": "Markdown"})
-                    startup_notified = True
-
-                if now.hour >= 22 and self.journal["last_summary_date"] != now.day and self.journal["geöffnet"] > 0:
-                    self.journal["last_summary_date"] = now.day
-                    if self.last_active_chat_id:
-                        print("22 Uhr erreicht: Sende automatischen Tagesabschluss...")
-                        self.send_stats_report(self.last_active_chat_id, title="🌙 *Titan AI Tagesabschluss (22 Uhr)*")
-
-                if now.weekday() == 4 and now.hour >= 18 and self.journal["last_weekly_week"] != current_week:
-                    self.journal["last_weekly_week"] = current_week
-                    if self.last_active_chat_id:
-                        print("Freitag 18 Uhr erreicht: Sende Wochenrückblick...")
-                        self.send_stats_report(self.last_active_chat_id, title="🏁 *Titan AI Wochenrückblick (Freitag 18 Uhr)*")
-
-                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={self.last_update_id + 1}&timeout=30"
-                res = requests.get(url).json()
+                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={self.last_update_id + 1}&timeout=10"
+                res = requests.get(url, timeout=15).json()
                
                 if res.get("ok") and res.get("result"):
                     for update in res["result"]:
                         self.last_update_id = update["update_id"]
                        
                         if "callback_query" in update:
+                            print("Callback Query empfangen!")
                             self.handle_callback(update["callback_query"])
                             continue
 
@@ -288,6 +257,7 @@ class TitanAI_Analyst:
                             continue
                        
                         self.last_active_chat_id = chat_id
+                        print(f"Nachricht empfangen von Chat {chat_id}: '{text_cmd}'")
 
                         if text_cmd in ["/start", "hallo", "hi", "start"]:
                             self.send_persistent_menu(str(chat_id))
@@ -297,31 +267,25 @@ class TitanAI_Analyst:
                             try:
                                 close_price = float(text_cmd.replace(",", "."))
                                 self.waiting_for_close_price[chat_id] = False
-                               
                                 self.journal["wins"] += 1
                                 self.journal["total_pips"] += 10.0
-                               
-                                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                                              json={"chat_id": chat_id, "text": f"✅ Manueller Exit bei `{close_price}` erfasst und ins Journal geschrieben!", "parse_mode": "Markdown"})
+                                self.send_plain_message(f"✅ Manueller Exit bei `{close_price}` erfasst!", str(chat_id))
                             except ValueError:
-                                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                                              json={"chat_id": chat_id, "text": "⚠️ Bitte gib eine gültige Zahl als Preis ein (z.B. 4102.50)."})
+                                self.send_plain_message("⚠️ Bitte gib eine gültige Zahl ein (z.B. 2650.50).", str(chat_id))
                             continue
 
                         if text_cmd in ["/signal", "15m"]:
-                            print("15m Signal angefordert...")
+                            print("15m Signal wird verarbeitet...")
                             setup = self.analyze_market("15m")
-                            if setup:
-                                self.send_message_with_buttons(setup, str(chat_id))
+                            self.send_message_with_buttons(setup, str(chat_id))
                         elif text_cmd in ["/scalp", "5m"]:
-                            print("5m Scalp angefordert...")
+                            print("5m Scalp wird verarbeitet...")
                             setup = self.analyze_market("5m")
-                            if setup:
-                                self.send_message_with_buttons(setup, str(chat_id))
-            except Exception as e:
-                pass
-            time.sleep(2)
+                            self.send_message_with_buttons(setup, str(chat_id))
 
+            except Exception as e:
+                print(f"Fehler in Polling Loop: {e}")
+            time.sleep(2)
 
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
@@ -330,4 +294,4 @@ if __name__ == "__main__":
     print("Flask Keep-Alive Server läuft im Hintergrund...")
 
     TitanAI_Analyst().listen()
-
+   
