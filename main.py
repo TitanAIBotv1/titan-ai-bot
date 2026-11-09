@@ -157,28 +157,27 @@ class TitanAI_Analyst:
                                 "• `/analyse` - Aktuelle Marktanalyse anfordern\n"
                                 "• `/signal` - Signal mit Interaktions-Buttons senden"
                             )
-                            self.send_message(welcome, target_chat_id=chat_id)
+                            self.send_message(welcome,chat_id)
                         elif text == "/analyse":
                             report = self.analyze_market()
-                            self.send_message(report, target_chat_id=chat_id)
+                            self.send_message(report,chat_id)
                         elif text == "/signal":
                             report = self.analyze_market()
-                            self.send_message_with_buttons(report, target_chat_id=chat_id)
+                            self.send_message_with_buttons(report, chat_id)
 
         except Exception as e:
             print(f"Fehler in Polling Loop: {e}")
 
-    def run(self):
+        def run(self):
         print("Titan AI Bot gestartet und einsatzbereit...")
         if self.chat_id:
-            msg = "🚀 *Titan AI Bot ist jetzt LIVE & online!*"
-            self.send_message_with_buttons(msg, target_chat_id=self.chat_id)
+            self.send_message_with_buttons("🚀 Titan AI Bot ist jetzt LIVE & online!", self.chat_id)
 
         while True:
             try:
                 self.handle_updates()
             except Exception as e:
-                print(f"Unerwarteter Fehler: {e}")
+                print(f"Worker-Fehler: {e}")
             time.sleep(2)
 
 
