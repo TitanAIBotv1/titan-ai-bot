@@ -60,6 +60,8 @@ class TitanAI_Analyst:
                 [
                     {"text": "✅ Trade geöffnet", "callback_data": "trade_open"},
                     {"text": "🎯 TP / Win erreicht", "callback_data": "trade_win"}
+                ],                [
+                    {"text": "🛡️ Break Even gezogen", "callback_data": "trade_be"}
                 ],
                 [
                     {"text": "❌ Stop-Loss / Loss", "callback_data": "trade_loss"},
