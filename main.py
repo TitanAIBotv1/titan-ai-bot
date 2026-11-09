@@ -20,13 +20,13 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Titan AI Bot v3.1 Original Enterprise Edition is Running Live!"
+    return "Titan AI Bot v3.1 Enterprise Edition is Running Live!"
 
 # ==========================================
 # TELEGRAM HELPER FUNCTIONS
 # ==========================================
 def clear_webhook():
-    """Sicherheits-Reset für Telegram Polling"""
+    """Löscht aktive Webhooks, damit Telegram Long-Polling fehlerfrei greift."""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
         requests.get(url, timeout=5)
@@ -66,7 +66,7 @@ def send_telegram_photo(photo_bytes, caption="", reply_markup=None):
         print(f"Telegram Photo Error: {e}")
 
 # ==========================================
-# MARKET DATA & CHART ENGINE (ORIGINAL)
+# MARKET DATA & CHART ENGINE
 # ==========================================
 def fetch_market_data(ticker="GC=Z", period="5d", interval="15m"):
     try:
@@ -293,6 +293,9 @@ def start_bot_thread():
     t.start()
 
 if __name__ == "__main__":
+    print("Starting Titan AI Bot background polling thread...")
     start_bot_thread()
-    app.run(host="0.0.0.0", port=10000)
+    print("Starting Flask application server...")
+    app.run(host="0.0.0.0", port=10000, use_reloader=False)
+
 
