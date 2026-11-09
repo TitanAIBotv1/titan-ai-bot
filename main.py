@@ -17,7 +17,7 @@ def home():
     return "Titan AI Bot (Ultimate Edition v3.0) is running 24/7!"
 
 def run_flask():
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, use_reloader=False)
 
 TELEGRAM_TOKEN = "8878607953:AAHBXqy1Kpa485kYa70hkj_EfaJ_EtHrIYc"
 
@@ -57,7 +57,8 @@ class TitanAI_Analyst:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         keyboard = {
             "keyboard": [
-                [{"text": "15m"}, {"text": "5m"}],
+                [{"text": "15m LONG"}, {"text": "15m SHORT"}],
+                [{"text": "5m LONG"}, {"text": "5m SHORT"}],
                 [{"text": "🚀 Update Info (Patch Notes)"}]
             ],
             "resize_keyboard": True,
@@ -65,7 +66,7 @@ class TitanAI_Analyst:
         }
         payload = {
             "chat_id": target_chat_id,
-            "text": "🎛️ *Titan AI Dynamic Menü aktiv*\nWähle deinen Zeitrahmen oder checke die Updates:",
+            "text": "🎛️ *Titan AI Dynamic Menü aktiv*\nWähle deinen Zeitrahmen und deine Richtung:",
             "parse_mode": "Markdown",
             "reply_markup": keyboard
         }
@@ -166,7 +167,7 @@ class TitanAI_Analyst:
             print(f"Fehler bei Chart-Generierung: {e}")
             return None
 
-    def analyze_market(self, timeframe="15m"):
+    def analyze_market(self, timeframe="15m", force_direction="LONG"):
         df_macro = self.fetch_data("1h")
         df_exec = self.fetch_data(timeframe)
 
@@ -206,13 +207,13 @@ class TitanAI_Analyst:
         atr = float(tr.ewm(alpha=1/14, adjust=False).mean().iloc[-1])
 
         prob = 55.0
-        if price >= ema50:
-            direction = "🟢 LONG 📈 *(Lokale Struktur)*"
+        if force_direction == "LONG":
+            direction = "🟢 LONG 📈 *(Manuelles Setup)*"
             raw_dir = "LONG"
             if price > ema200: prob += 15.0
             if "BULLISH" in macro_trend: prob += 15.0 
         else:
-            direction = "🔴 SHORT 📉 *(Lokale Struktur)*"
+            direction = "🔴 SHORT 📉 *(Manuelles Setup)*"
             raw_dir = "SHORT"
             if price < ema200: prob += 15.0
             if "BEARISH" in macro_trend: prob += 15.0 
@@ -245,7 +246,6 @@ class TitanAI_Analyst:
                 tp4 = price - (atr * 1.5); tp5 = price - (atr * 2.5); tp6 = price - (atr * 4.0)
             title = f"🚨 *TITAN AI DYNAMIC SETUP [{timeframe}]* 🚨"
 
-        # Aktiven Trade für den progressiven Multi-TP Tracker initialisieren
         self.active_trade = {
             "direction": raw_dir,
             "entry": price,
@@ -319,7 +319,6 @@ class TitanAI_Analyst:
         self.send_plain_message(stats_msg, chat_id)
 
     def background_trade_watcher(self):
-        """Fortlaufender Hintergrund-Tracker für TP1 bis TP6 im Live-Chart"""
         while True:
             try:
                 if self.active_trade:
@@ -333,7 +332,6 @@ class TitanAI_Analyst:
                         chat_id = trade["chat_id"]
 
                         if chat_id:
-                            # Prüfe nacheinander TP1 bis TP6
                             for i, tp_val in enumerate(tps):
                                 if not reached[i]:
                                     hit = False
@@ -374,6 +372,12 @@ class TitanAI_Analyst:
             time.sleep(15)
 
     def listen(self):
+        try:
+            # Löscht alte Blockaden bei Telegram vor dem Start
+            requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=5)
+        except:
+            pass
+        
         print("Titan AI v3.0 Polling gestartet...")
         while True:
             try:
@@ -418,11 +422,18 @@ class TitanAI_Analyst:
                                 self.send_plain_message("⚠️ Bitte gib eine gültige Zahl ein.", str(chat_id))
                             continue
 
-                        if text_cmd in ["/signal", "15m"]:
-                            setup, chart = self.analyze_market("15m")
+                        # HIER SIND DIE NEUEN BUTTON-ABFRAGEN
+                        if text_cmd == "15m long":
+                            setup, chart = self.analyze_market("15m", "LONG")
                             self.send_message_with_buttons(setup, str(chat_id), chart)
-                        elif text_cmd in ["/scalp", "5m"]:
-                            setup, chart = self.analyze_market("5m")
+                        elif text_cmd == "15m short":
+                            setup, chart = self.analyze_market("15m", "SHORT")
+                            self.send_message_with_buttons(setup, str(chat_id), chart)
+                        elif text_cmd == "5m long":
+                            setup, chart = self.analyze_market("5m", "LONG")
+                            self.send_message_with_buttons(setup, str(chat_id), chart)
+                        elif text_cmd == "5m short":
+                            setup, chart = self.analyze_market("5m", "SHORT")
                             self.send_message_with_buttons(setup, str(chat_id), chart)
 
             except Exception as e:
