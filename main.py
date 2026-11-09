@@ -231,6 +231,38 @@ class TitanAI_Analyst:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       json={"chat_id": chat_id, "text": stats_msg, "parse_mode": "Markdown"})
 
+    def check_xauusd_milestones(self, current_price, trade):
+        # 1. Warnung kurz vor TP1 (bei 95% des Weges)
+        distance_to_tp1 = trade["tp1"] - trade["entry_price"]
+        current_progress = current_price - trade["entry_price"]
+
+        if not trade.get("be_warned", False) and current_progress >= (distance_to_tp1 * 0.95):
+            self.send_telegram_message(
+                f"⚠️ **XAUUSD (Gold) - TP1 steht kurz bevor!** Kurs ist bei {current_price}. Bitte ziehe deinen Stop-Loss jetzt auf **Break-Even**!"
+            )
+            trade["be_warned"] = True
+
+        # 2. Prüfen, ob TP1 gehittet wurde
+        if not trade.get("tp1_hit", False) and current_price >= trade["tp1"]:
+            self.send_telegram_message(
+                f"🎯 **XAUUSD: TP1 erfolgreich gehittet!** Kurs hat {trade['tp1']} erreicht. Siehe bitte Break-Even."
+            )
+            trade["tp1_hit"] = True
+
+        # 3. Prüfen, ob TP2 gehittet wurde
+        if not trade.get("tp2_hit", False) and current_price >= trade["tp2"]:
+            self.send_telegram_message(
+                f"🚀 **XAUUSD: TP2 erfolgreich gehittet!** Kurs hat {trade['tp2']} erreicht."
+            )
+            trade["tp2_hit"] = True
+
+        # 4. Prüfen, ob Golden Profit gehittet wurde
+        if not trade.get("golden_hit", False) and current_price >= trade["golden_profit"]:
+            self.send_telegram_message(
+                f"🏆 **XAUUSD: GOLDEN PROFIT ERREICHT!** Unglaubliche Performance bei {trade['golden_profit']}!"
+            )
+            trade["golden_hit"] = True
+
     def listen(self):
         print("Titan AI (inkl. automatischer Update-Nachricht) gestartet...")
         
@@ -334,3 +366,4 @@ if __name__ == "__main__":
 
   # Startet deinen Bot
   TitanAI_Analyst().listen()
+    
