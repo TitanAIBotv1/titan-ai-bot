@@ -1,3 +1,4 @@
+import datetime
 import time
 import threading
 import io
@@ -139,7 +140,7 @@ class TitanAI_Analyst:
         try:
             plt.figure(figsize=(10, 5))
             plt.style.use('dark_background')
-
+            
             subset = df.tail(50)
             plt.plot(subset.index, subset['Close'], label='Close', color='#00ffcc', linewidth=1.5)
             if 'EMA_50' in subset:
@@ -378,11 +379,11 @@ class TitanAI_Analyst:
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={self.last_update_id + 1}&timeout=10"
                 res = requests.get(url, timeout=15).json()
-
+               
                 if res.get("ok") and res.get("result"):
                     for update in res["result"]:
                         self.last_update_id = update["update_id"]
-
+                       
                         if "callback_query" in update:
                             self.handle_callback(update["callback_query"])
                             continue
@@ -390,17 +391,17 @@ class TitanAI_Analyst:
                         msg = update.get("message") or update.get("channel_post") or {}
                         chat_id = msg.get("chat", {}).get("id")
                         text_cmd = msg.get("text", "").strip().lower()
-
+                       
                         if not chat_id:
                            continue
-
+                       
                         self.last_active_chat_id = chat_id
 
                         if text_cmd in ["/start", "hallo", "hi", "start"]:
                             self.send_update_info(str(chat_id))
                             self.send_persistent_menu(str(chat_id))
                             continue
-
+                            
                         if "update info" in text_cmd or text_cmd == "/update":
                             self.send_update_info(str(chat_id))
                             continue
@@ -440,4 +441,3 @@ if __name__ == "__main__":
 
     print("Alle Titan AI v3.0 Dienste aktiv...")
     analyst.listen()
-
