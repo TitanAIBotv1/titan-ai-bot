@@ -20,6 +20,7 @@ def run_flask():
     app.run(host="0.0.0.0", port=5000, use_reloader=False)
 
 TELEGRAM_TOKEN = "8878607953:AAHBXqy1Kpa485kYa70hkj_EfaJ_EtHrIYc"
+BRIDGE_CHAT_ID = -5343570651 # Deine Titan_Bridge Gruppe für den PC-Bot
 
 class TitanAI_Analyst:
     def __init__(self, risk_percentage: float = 1.0):
@@ -35,7 +36,7 @@ class TitanAI_Analyst:
         }
         self.waiting_for_close_price = {}
         self.last_active_chat_id = None
-        self.active_trade = None 
+        self.active_trade = None
 
     def send_update_info(self, target_chat_id: str):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -59,6 +60,7 @@ class TitanAI_Analyst:
             "keyboard": [
                 [{"text": "15m LONG"}, {"text": "15m SHORT"}],
                 [{"text": "5m LONG"}, {"text": "5m SHORT"}],
+                [{"text": "🚀 Trade automatisieren"}], # Admin-Button für die Bridge
                 [{"text": "🚀 Update Info (Patch Notes)"}]
             ],
             "resize_keyboard": True,
@@ -141,7 +143,7 @@ class TitanAI_Analyst:
         try:
             plt.figure(figsize=(10, 5))
             plt.style.use('dark_background')
-            
+           
             subset = df.tail(50)
             plt.plot(subset.index, subset['Close'], label='Close', color='#00ffcc', linewidth=1.5)
             if 'EMA_50' in subset:
@@ -211,14 +213,14 @@ class TitanAI_Analyst:
             direction = "🟢 LONG 📈 *(Manuelles Setup)*"
             raw_dir = "LONG"
             if price > ema200: prob += 15.0
-            if "BULLISH" in macro_trend: prob += 15.0 
+            if "BULLISH" in macro_trend: prob += 15.0
         else:
             direction = "🔴 SHORT 📉 *(Manuelles Setup)*"
             raw_dir = "SHORT"
             if price < ema200: prob += 15.0
-            if "BEARISH" in macro_trend: prob += 15.0 
+            if "BEARISH" in macro_trend: prob += 15.0
 
-        if 40 <= rsi <= 60: 
+        if 40 <= rsi <= 60:
             prob += 10.0
 
         session_info = self.get_market_session()
@@ -307,7 +309,7 @@ class TitanAI_Analyst:
             self.send_stats_report(chat_id)
 
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                      json={"callback_query_id": query_id, "text": answer_text})
+                    json={"callback_query_id": query_id, "text": answer_text})
 
     def send_stats_report(self, chat_id, title="📊 *Titan AI Tagesjournal*"):
         stats_msg = (
@@ -373,11 +375,10 @@ class TitanAI_Analyst:
 
     def listen(self):
         try:
-            # Löscht alte Blockaden bei Telegram vor dem Start
             requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=5)
         except:
             pass
-        
+       
         print("Titan AI v3.0 Polling gestartet...")
         while True:
             try:
@@ -394,6 +395,7 @@ class TitanAI_Analyst:
 
                         msg = update.get("message") or update.get("channel_post") or {}
                         chat_id = msg.get("chat", {}).get("id")
+                        user_id = msg.get("from", {}).get("id")
                         text_cmd = msg.get("text", "").strip().lower()
                        
                         if not chat_id:
@@ -422,7 +424,31 @@ class TitanAI_Analyst:
                                 self.send_plain_message("⚠️ Bitte gib eine gültige Zahl ein.", str(chat_id))
                             continue
 
-                        # HIER SIND DIE NEUEN BUTTON-ABFRAGEN
+                        # NEU: ADMIN-GESICHERTER BUTTON FÜR DIE BRIDGE
+                        if text_cmd == "🚀 trade automatisieren":
+                            # DEINE ADMIN-USER-ID HIER EINTRAGEN (z.B. deine ID aus dem getUpdates-JSON von vorhin: 878912424)
+                            ADMIN_ID = 878912424  
+                            
+                            if user_id != ADMIN_ID:
+                                self.send_plain_message("⛔ Zugriff verwehrt! Nur der Administrator kann den automatischen Handel aktivieren.", str(chat_id))
+                                continue
+
+                            if not self.active_trade:
+                                self.send_plain_message("⚠️ Kein aktives Setup vorhanden! Bitte generiere zuerst ein Signal (z.B. 15m Long oder Short).", str(chat_id))
+                                continue
+
+                            # Signal formatieren und an die Titan_Bridge senden
+                            tps = self.active_trade["tps"]
+                            direction = self.active_trade["direction"]
+                            entry = self.active_trade["entry"]
+                            sl = self.active_trade["sl"]
+                            tp1 = tps[0]
+
+                            bridge_signal = f"exec_{direction}_{entry}_{sl}_{tp1}"
+                            self.send_plain_message(bridge_signal, str(BRIDGE_CHAT_ID))
+                            self.send_plain_message(f"✅ *Signal erfolgreich an die Titan_Bridge gesendet!*\n`{bridge_signal}`", str(chat_id))
+                            continue
+
                         if text_cmd == "15m long":
                             setup, chart = self.analyze_market("15m", "LONG")
                             self.send_message_with_buttons(setup, str(chat_id), chart)
@@ -452,3 +478,4 @@ if __name__ == "__main__":
 
     print("Alle Titan AI v3.0 Dienste aktiv...")
     analyst.listen()
+
