@@ -288,7 +288,6 @@ class TitanAI_Analyst:
         chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
         self.last_active_chat_id = chat_id
 
-        # Deine hinterlegte Admin-ID
         ADMIN_USER_ID = 8789124240
 
         answer_text = "Erfolgreich vermerkt!"
@@ -297,9 +296,8 @@ class TitanAI_Analyst:
             if user_id != ADMIN_USER_ID:
                 answer_text = "Zugriff verwehrt! Nur der Administrator kann den automatischen Handel aktivieren."
             else:
-                answer_text = "🤖 Automatischer Handel für diesen Trade aktiviert!"
-                
                 if self.active_trade:
+                    answer_text = "🤖 Automatischer Handel für diesen Trade aktiviert!"
                     trade = self.active_trade
                     exec_msg = (
                         f"⚡ EXECUTE_TRADE ⚡\n"
@@ -309,7 +307,9 @@ class TitanAI_Analyst:
                         f"TP1: {trade['tps'][0]:.2f}"
                     )
                     self.send_plain_message(exec_msg, str(chat_id))
-                    
+                else:
+                    answer_text = "⚠️ Kein aktiver Trade im Speicher! Bitte erst z.B. '15m long' senden."
+                
         elif data == "trade_open":
             self.journal["geöffnet"] += 1
             answer_text = "Trade geöffnet. Multi-TP Tracker läuft!"
