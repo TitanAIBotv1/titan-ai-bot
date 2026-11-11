@@ -47,6 +47,10 @@ class TitanAI_Analyst:
         self.waiting_for_close_price = {}
         self.last_active_chat_id = None
         self.active_trade = None
+        
+        # NEU: Gedächtnis für Deduplizierung (verhindert doppelte Nachrichten)
+        self.processed_updates = set()
+        self.processed_callbacks = set()
 
     def send_update_info(self, target_chat_id: str):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -82,9 +86,8 @@ class TitanAI_Analyst:
         requests.post(url, json=payload)
 
     def send_message_with_buttons(self, text: str, target_chat_id: str, photo_bytes=None, is_live=False):
-        # Der Button heißt jetzt IMMER gleich, unterscheidet aber intern, was gesendet wird!
         auto_btn = {"text": "🤖 Trade automatisieren", "callback_data": "automate_live" if is_live else "automate_pending"}
-        
+       
         keyboard = {
             "inline_keyboard": [
                 [
@@ -226,7 +229,7 @@ class TitanAI_Analyst:
 
         session_info = self.get_market_session()
         sl_dist = round(atr * 1.2, 2) if timeframe != "5m" else round(atr * 0.9, 2)
-        
+       
         if raw_dir == "LONG":
             sl = price - sl_dist
             tp1 = price + 3.0; tp2 = price + 6.0; tp3 = price + 10.0; tp4 = price + (atr*1.5); tp5 = price + (atr*2.5); tp6 = price + (atr*4.0)
@@ -235,7 +238,7 @@ class TitanAI_Analyst:
             sl = price + sl_dist
             tp1 = price - 3.0; tp2 = price - 6.0; tp3 = price - 10.0; tp4 = price - (atr*1.5); tp5 = price - (atr*2.5); tp6 = price - (atr*4.0)
             if timeframe == "5m": tp1 = price - 1.5; tp2 = price - 3.0; tp3 = price - 5.0; tp4 = price - (atr*1.0); tp5 = price - (atr*1.8); tp6 = price - (atr*3.0)
-        
+       
         title = "⚡ *TITAN AI LIVE-MARKT-ANALYSE* ⚡" if is_live_mode else f"🚨 *TITAN AI SETUP [{timeframe}]* 🚨"
 
         self.active_trade = {
@@ -270,33 +273,67 @@ class TitanAI_Analyst:
 
     def handle_callback(self, callback_query):
         global pending_signal
+        
         query_id = callback_query.get("id")
+        
+        # NEU: Deduplizierung gegen Doppel-Klicks (verhindert doppelte Ausführung)
+        if query_id in self.processed_callbacks:
+            return
+        self.processed_callbacks.add(query_id)
+        if len(self.processed_callbacks) > 500:
+            self.processed_callbacks.clear() # Hält den Speicher sauber
+            
         data = callback_query.get("data")
         user_id = callback_query.get("from", {}).get("id")
         chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
         self.last_active_chat_id = chat_id
 
         answer_text = "Erfolgreich vermerkt!"
-        
+       
         if data in ["automate_live", "automate_pending"]:
             if user_id != ADMIN_USER_ID:
                 answer_text = "⚠️ Zugriff verwehrt! Nur der Admin darf Trades automatisieren."
             else:
                 if self.active_trade:
                     trade = self.active_trade
+                    
+                    # NEU: Live Pip-Abstand messen! (Maximal 20 Pips Abstand erlaubt)
+                    df_check = self.fetch_data("1m")
+                    if not df_check.empty:
+                        current_price = float(df_check.iloc[-1]['Close'])
+                        # Bei Gold entspricht 1 Pip i.d.R. 0.1 im Kurs (2000.0 auf 2000.1)
+                        pip_distance = abs(current_price - trade["entry"]) / 0.1
+                        
+                        if pip_distance > 20.0:
+                            # Alarm an Telegram, Klick wird ignoriert!
+                            alert_msg = f"⚠️ Setup abgelaufen! Der Preis ist {pip_distance:.1f} Pips entfernt (Max 20)."
+                            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                                          json={"callback_query_id": query_id, "text": alert_msg, "show_alert": True})
+                            return
+
+                    # NEU: Das Signal-Paket präziser für das MT5 PC-Skript packen
                     order_type = "MARKET" if data == "automate_live" else "PENDING"
+                    
+                    # Exakte Action setzen, damit MT5 weiß, was zu tun ist!
+                    if data == "automate_live":
+                        action_str = "BUY" if trade["direction"] == "LONG" else "SELL"
+                    else:
+                        action_str = "BUY_LIMIT" if trade["direction"] == "LONG" else "SELL_LIMIT"
+
                     pending_signal = {
+                        "action": action_str, # NEU: Eindeutiger Befehl für MT5
+                        "symbol": "XAUUSD", # NEU: Explizites Symbol
                         "direction": trade["direction"],
                         "entry": trade["entry"],
                         "sl": trade["sl"],
                         "tp1": trade["tps"][0],
                         "type": order_type
                     }
-                    answer_text = f"🤖 Signal ({order_type}) an lokalen PC gesendet!"
-                    self.send_plain_message(f"⚡ **Automatisches Signal ({order_type}) generiert!**\nDer PC-Listener ruft die Order jetzt ab und trägt sie in MT5 ein.", str(chat_id))
+                    answer_text = f"🤖 Signal ({action_str}) an lokalen PC gesendet!"
+                    self.send_plain_message(f"⚡ **Automatisches Signal ({action_str}) generiert!**\nDer PC-Listener ruft die Order jetzt ab und trägt sie in MT5 ein.", str(chat_id))
                 else:
                     answer_text = "⚠️ Kein aktiver Trade im Speicher!"
-                
+               
         elif data == "trade_open":
             self.journal["geöffnet"] += 1
             answer_text = "Trade geöffnet."
@@ -346,17 +383,25 @@ class TitanAI_Analyst:
             requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=5)
         except:
             pass
-        
+       
         print("Titan AI v3.0 Polling gestartet...")
         while True:
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={self.last_update_id + 1}&timeout=10"
                 res = requests.get(url, timeout=15).json()
-                
+               
                 if res.get("ok") and res.get("result"):
                     for update in res["result"]:
-                        self.last_update_id = update["update_id"]
+                        update_id = update["update_id"]
+                        self.last_update_id = update_id
                         
+                        # NEU: Deduplizierung gegen Telegram-Spam (doppelte Updates ignorieren)
+                        if update_id in self.processed_updates:
+                            continue
+                        self.processed_updates.add(update_id)
+                        if len(self.processed_updates) > 1000:
+                            self.processed_updates.clear()
+                       
                         if "callback_query" in update:
                             self.handle_callback(update["callback_query"])
                             continue
@@ -364,10 +409,10 @@ class TitanAI_Analyst:
                         msg = update.get("message") or {}
                         chat_id = msg.get("chat", {}).get("id")
                         text_cmd = msg.get("text", "").strip().lower()
-                        
+                       
                         if not chat_id:
                            continue
-                        
+                       
                         self.last_active_chat_id = chat_id
 
                         if text_cmd in ["/start", "hallo", "hi", "start", "update info"]:
@@ -407,3 +452,5 @@ if __name__ == "__main__":
 
     print("Alle Titan AI v3.0 Dienste aktiv...")
     analyst.listen()
+
+
