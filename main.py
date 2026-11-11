@@ -1,5 +1,6 @@
 import os
 import datetime
+from datetime import timezone
 import time
 import threading
 import io
@@ -40,6 +41,7 @@ class TitanAI_Analyst:
     def __init__(self, risk_percentage: float = 1.0):
         self.risk_percentage = risk_percentage
         self.last_update_id = 0
+        self.last_command_time = 0 # NEU: Spam-Schutz gegen doppelte Ausführung
         self.journal = {
             "geöffnet": 0,
             "wins": 0,
@@ -84,7 +86,6 @@ class TitanAI_Analyst:
         requests.post(url, json=payload)
 
     def send_message_with_buttons(self, text: str, target_chat_id: str, photo_bytes=None, is_live=False):
-        # Der Button heißt jetzt IMMER gleich, unterscheidet aber intern, was gesendet wird!
         auto_btn = {"text": "🤖 Trade automatisieren", "callback_data": "automate_live" if is_live else "automate_pending"}
        
         keyboard = {
@@ -121,7 +122,8 @@ class TitanAI_Analyst:
         requests.post(url, json={"chat_id": target_chat_id, "text": text, "parse_mode": "Markdown"})
 
     def get_market_session(self):
-        now_utc = datetime.datetime.utcnow().hour
+        # FIX für die Deprecation Warning auf Render
+        now_utc = datetime.datetime.now(timezone.utc).hour
         if 7 <= now_utc < 12:
             return "London Session 🇬🇧"
         elif 12 <= now_utc < 17:
@@ -131,16 +133,16 @@ class TitanAI_Analyst:
         else:
             return "Asien Session 🌙"
 
-    def fetch_data(self, interval):
+    def fetch_data(self, interval, period="5d"):
         df = pd.DataFrame()
         for symbol in ["GC=F", "XAUUSD=X"]:
             try:
-                df = yf.download(symbol, interval=interval, period="5d", progress=False)
+                df = yf.download(symbol, interval=interval, period=period, progress=False)
                 if not df.empty:
                     break
             except Exception:
                 pass
-            time.sleep(1)
+            time.sleep(0.5)
         return df
 
     def create_chart_image(self, df, direction, price, sl, tp1):
@@ -194,6 +196,13 @@ class TitanAI_Analyst:
         price = round(float(current['Close']), 2)
         ema200 = float(current['EMA_200'])
 
+        # NEU: Exakter 1-Minuten-Preis-Abruf für die Live-Order, damit Entry nicht verfälscht ist!
+        if is_live_mode:
+            df_live = self.fetch_data("1m", period="1d")
+            if not df_live.empty:
+                price = round(float(df_live.iloc[-1]['Close']), 2)
+            force_direction = "LONG" if price > ema200 else "SHORT"
+
         delta = df_exec['Close'].diff()
         gain = delta.where(delta > 0, 0.0)
         loss = -delta.where(delta < 0, 0.0)
@@ -207,9 +216,6 @@ class TitanAI_Analyst:
         low_close = (df_exec['Low'] - df_exec['Close'].shift()).abs()
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         atr = float(tr.ewm(alpha=1/14, adjust=False).mean().iloc[-1])
-
-        if is_live_mode:
-            force_direction = "LONG" if price > ema200 else "SHORT"
 
         prob = 55.0
         if force_direction == "LONG":
@@ -278,6 +284,13 @@ class TitanAI_Analyst:
         chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
         self.last_active_chat_id = chat_id
 
+        # Spam-Schutz für Callback-Buttons (verhindert mehrfaches Klicken in kurzer Zeit)
+        now = time.time()
+        if now - self.last_command_time < 3:
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": query_id, "text": "Bitte kurz warten..."})
+            return
+        self.last_command_time = now
+
         answer_text = "Erfolgreich vermerkt!"
        
         if data in ["automate_live", "automate_pending"]:
@@ -323,7 +336,7 @@ class TitanAI_Analyst:
         while True:
             try:
                 if self.active_trade:
-                    df = self.fetch_data("1m")
+                    df = self.fetch_data("1m", period="1d")
                     if not df.empty:
                         current_price = float(df.iloc[-1]['Close'])
                         trade = self.active_trade
@@ -367,10 +380,16 @@ class TitanAI_Analyst:
                         chat_id = msg.get("chat", {}).get("id")
                         text_cmd = msg.get("text", "").strip().lower()
                        
-                        if not chat_id:
+                        if not chat_id or not text_cmd:
                            continue
                        
                         self.last_active_chat_id = chat_id
+
+                        # Spam-Schutz für Text-Menü-Befehle (Ignoriert doppelte Klicks innerhalb von 3 Sekunden)
+                        now = time.time()
+                        if now - self.last_command_time < 3:
+                            continue
+                        self.last_command_time = now
 
                         if text_cmd in ["/start", "hallo", "hi", "start", "update info"]:
                             self.send_update_info(str(chat_id))
