@@ -306,9 +306,8 @@ class TitanAI_Analyst:
                         f"Stop-Loss: {trade['sl']:.2f}\n"
                         f"TP1: {trade['tps'][0]:.2f}"
                     )
-                    # Hier wird der Befehl jetzt direkt an den Kanal geschickt, wo dein lokaler Listener lauscht!
-                    channel_target = "@TitanAI_XAUUSD" # Falls dein Kanal so heißt (oder Kanal-ID nutzen)
-                    self.send_plain_message(exec_msg, channel_target)
+                    # Schickt das Signal direkt in deinen aktiven Privatchat zurück!
+                    self.send_plain_message(exec_msg, str(chat_id))
                 else:
                     answer_text = "⚠️ Kein aktiver Trade im Speicher! Bitte erst z.B. '15m long' senden."
                 
