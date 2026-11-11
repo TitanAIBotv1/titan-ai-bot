@@ -5,21 +5,34 @@ import io
 import matplotlib
 matplotlib.use('Agg') # Wichtig für Server ohne Display (Render)
 import matplotlib.pyplot as plt
-from flask import Flask
+from flask import Flask, jsonify
 import requests
 import yfinance as yf
 import pandas as pd
 
 app = Flask(__name__)
 
+# Hier speichern wir das Signal für deinen PC zwischen (Briefkasten-Architektur)
+pending_signal = None
+
 @app.route("/")
 def home():
     return "Titan AI Bot (Ultimate Edition v3.0) is running 24/7!"
+
+@app.route("/api/signal", methods=["GET"])
+def get_signal():
+    global pending_signal
+    if pending_signal:
+        data = pending_signal
+        pending_signal = None # Nach dem Abholen sofort leeren, damit nicht doppelt ausgeführt wird
+        return jsonify({"status": "success", "signal": data})
+    return jsonify({"status": "empty"})
 
 def run_flask():
     app.run(host="0.0.0.0", port=5000, use_reloader=False)
 
 TELEGRAM_TOKEN = "8878607953:AAHBXqy1Kpa485kYa70hkj_EfaJ_EtHrIYc"
+ADMIN_USER_ID = 8789124240
 
 class TitanAI_Analyst:
     def __init__(self, risk_percentage: float = 1.0):
@@ -29,28 +42,22 @@ class TitanAI_Analyst:
             "geöffnet": 0,
             "wins": 0,
             "losses": 0,
-            "total_pips": 0.0,
-            "last_summary_date": None,
-            "last_weekly_week": None
+            "total_pips": 0.0
         }
         self.waiting_for_close_price = {}
         self.last_active_chat_id = None
         self.active_trade = None
-        # Deduplizierungs-Set gegen doppelte Nachrichten/Signale
-        self.processed_update_ids = set()
 
     def send_update_info(self, target_chat_id: str):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         text = (
             "🚀 *TITAN AI UPDATE – Version 3.0 ist live!* 🚀\n\n"
-            "*Was ist neu in diesem Update?*\n"
             "🟢 *Multi-Timeframe-Logik:* Der Bot checkt den 1H-Trend und die lokale Struktur.\n"
             "📊 *Live-Chart Bilder:* Setup-Visualisierung direkt als Foto.\n"
-            "🎯 *Progressiver Multi-TP-Tracker:* Überwacht fortlaufend alle Stufen von *TP1 bis TP6 (Golden Profit)* im Hintergrund!\n"
+            "🎯 *Progressiver Multi-TP-Tracker:* Überwacht fortlaufend alle Stufen.\n"
             "🛡️ *Automatischer Break-Even:* Sofort-Alarm bei TP1 zum Absichern.\n"
             "📰 *News- & Session-Filter:* Intelligente Erkennung von Marktphasen.\n"
-            "🔄 *Dynamische Richtung:* Flexible Long- & Short-Setups (max. 10-20 Pips Abstand).\n\n"
-            "🤖 *Automatisierung:* Direkter Live-Trade-Exec-Button aktiv!"
+            "🔄 *Dynamische Richtung:* Flexible Long- & Short-Setups."
         )
         requests.post(url, json={"chat_id": target_chat_id, "text": text, "parse_mode": "Markdown"})
 
@@ -60,7 +67,8 @@ class TitanAI_Analyst:
             "keyboard": [
                 [{"text": "15m LONG"}, {"text": "15m SHORT"}],
                 [{"text": "5m LONG"}, {"text": "5m SHORT"}],
-                [{"text": "🚀 Update Info (Patch Notes)"}]
+                [{"text": "⚡ LIVE Markt-Analyse"}],
+                [{"text": "🚀 Update Info"}]
             ],
             "resize_keyboard": True,
             "is_persistent": True
@@ -73,7 +81,10 @@ class TitanAI_Analyst:
         }
         requests.post(url, json=payload)
 
-    def send_message_with_buttons(self, text: str, target_chat_id: str, photo_bytes=None):
+    def send_message_with_buttons(self, text: str, target_chat_id: str, photo_bytes=None, is_live=False):
+        # Der Button heißt jetzt IMMER gleich, unterscheidet aber intern, was gesendet wird!
+        auto_btn = {"text": "🤖 Trade automatisieren", "callback_data": "automate_live" if is_live else "automate_pending"}
+       
         keyboard = {
             "inline_keyboard": [
                 [
@@ -88,9 +99,7 @@ class TitanAI_Analyst:
                     {"text": "✏️ Manuell geschlossen", "callback_data": "trade_manual"},
                     {"text": "📊 Journal Statistik", "callback_data": "show_stats"}
                 ],
-                [
-                    {"text": "🤖 Trade automatisieren", "callback_data": "automate_trade"}
-                ]
+                [auto_btn]
             ]
         }
 
@@ -104,15 +113,6 @@ class TitanAI_Analyst:
                 "reply_markup": str(keyboard).replace("'", '"')
             }
             requests.post(url, data=data, files=files)
-        else:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            payload = {
-                "chat_id": target_chat_id,
-                "text": text,
-                "parse_mode": "Markdown",
-                "reply_markup": keyboard
-            }
-            requests.post(url, json=payload)
 
     def send_plain_message(self, text: str, target_chat_id: str):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -121,13 +121,13 @@ class TitanAI_Analyst:
     def get_market_session(self):
         now_utc = datetime.datetime.utcnow().hour
         if 7 <= now_utc < 12:
-            return "London Session 🇬🇧 (Hohe Volatilität)"
+            return "London Session 🇬🇧"
         elif 12 <= now_utc < 17:
-            return "New York / London Überschneidung 🇺🇸 (Prime Time - News beachten!)"
+            return "New York / London 🇺🇸"
         elif 17 <= now_utc < 21:
-            return "New York Nachmittag 🗽 (Erhöhte Spread-Gefahr)"
+            return "New York Nachmittag 🗽"
         else:
-            return "Asien Session 🌙 (Ruhig / Range)"
+            return "Asien Session 🌙"
 
     def fetch_data(self, interval):
         df = pd.DataFrame()
@@ -145,7 +145,6 @@ class TitanAI_Analyst:
         try:
             plt.figure(figsize=(10, 5))
             plt.style.use('dark_background')
-           
             subset = df.tail(50)
             plt.plot(subset.index, subset['Close'], label='Close', color='#00ffcc', linewidth=1.5)
             if 'EMA_50' in subset:
@@ -156,7 +155,6 @@ class TitanAI_Analyst:
             plt.axhline(price, color='#ffffff', linestyle='-', alpha=0.9, label=f'Entry: {price}')
             plt.axhline(sl, color='#ff3333', linestyle=':', alpha=0.9, label=f'SL: {sl}')
             plt.axhline(tp1, color='#33ff33', linestyle=':', alpha=0.9, label=f'TP1: {tp1}')
-
             plt.title(f"Titan AI Setup v3.0 | Gold ({direction})", fontsize=12, color='white', fontweight='bold')
             plt.legend(loc='upper left', fontsize=8)
             plt.grid(color='#333333', linestyle='--', linewidth=0.5)
@@ -167,11 +165,10 @@ class TitanAI_Analyst:
             buf.seek(0)
             plt.close()
             return buf.getvalue()
-        except Exception as e:
-            print(f"Fehler bei Chart-Generierung: {e}")
+        except Exception:
             return None
 
-    def analyze_market(self, timeframe="15m", force_direction="LONG"):
+    def analyze_market(self, timeframe="15m", force_direction="LONG", is_live_mode=False):
         df_macro = self.fetch_data("1h")
         df_exec = self.fetch_data(timeframe)
 
@@ -193,7 +190,6 @@ class TitanAI_Analyst:
 
         current = df_exec.iloc[-1]
         price = round(float(current['Close']), 2)
-        ema50 = float(current['EMA_50'])
         ema200 = float(current['EMA_200'])
 
         delta = df_exec['Close'].diff()
@@ -210,14 +206,17 @@ class TitanAI_Analyst:
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         atr = float(tr.ewm(alpha=1/14, adjust=False).mean().iloc[-1])
 
+        if is_live_mode:
+            force_direction = "LONG" if price > ema200 else "SHORT"
+
         prob = 55.0
         if force_direction == "LONG":
-            direction = "🟢 LONG 📈 *(Manuelles Setup)*"
+            direction = "🟢 LONG 📈"
             raw_dir = "LONG"
             if price > ema200: prob += 15.0
             if "BULLISH" in macro_trend: prob += 15.0
         else:
-            direction = "🔴 SHORT 📉 *(Manuelles Setup)*"
+            direction = "🔴 SHORT 📉"
             raw_dir = "SHORT"
             if price < ema200: prob += 15.0
             if "BEARISH" in macro_trend: prob += 15.0
@@ -226,37 +225,25 @@ class TitanAI_Analyst:
             prob += 10.0
 
         session_info = self.get_market_session()
-
-        # Fix: Maximal 10 bis 20 Pips (Punkte) Abstand für SL und TP1 eingestellt
-        if timeframe == "5m":
-            sl_dist = 1.5 # fester, enger Abstand (entspricht ca. 15 Pips im Goldbereich)
-            if raw_dir == "LONG":
-                sl = price - sl_dist
-                tp1 = price + 1.5; tp2 = price + 3.0; tp3 = price + 5.0
-                tp4 = price + 7.0; tp5 = price + 10.0; tp6 = price + 15.0
-            else:
-                sl = price + sl_dist
-                tp1 = price - 1.5; tp2 = price - 3.0; tp3 = price - 5.0
-                tp4 = price - 7.0; tp5 = price - 10.0; tp6 = price - 15.0
-            title = f"⚡ *TITAN AI DYNAMIC SCALP [{timeframe}]* ⚡"
+        sl_dist = round(atr * 1.2, 2) if timeframe != "5m" else round(atr * 0.9, 2)
+       
+        if raw_dir == "LONG":
+            sl = price - sl_dist
+            tp1 = price + 3.0; tp2 = price + 6.0; tp3 = price + 10.0; tp4 = price + (atr*1.5); tp5 = price + (atr*2.5); tp6 = price + (atr*4.0)
+            if timeframe == "5m": tp1 = price + 1.5; tp2 = price + 3.0; tp3 = price + 5.0; tp4 = price + (atr*1.0); tp5 = price + (atr*1.8); tp6 = price + (atr*3.0)
         else:
-            sl_dist = 2.0 # enger Puffer für 15m (max 20 Pips)
-            if raw_dir == "LONG":
-                sl = price - sl_dist
-                tp1 = price + 2.0; tp2 = price + 4.0; tp3 = price + 7.0
-                tp4 = price + 10.0; tp5 = price + 14.0; tp6 = price + 20.0
-            else:
-                sl = price + sl_dist
-                tp1 = price - 2.0; tp2 = price - 4.0; tp3 = price - 7.0
-                tp4 = price - 10.0; tp5 = price - 14.0; tp6 = price - 20.0
-            title = f"🚨 *TITAN AI DYNAMIC SETUP [{timeframe}]* 🚨"
+            sl = price + sl_dist
+            tp1 = price - 3.0; tp2 = price - 6.0; tp3 = price - 10.0; tp4 = price - (atr*1.5); tp5 = price - (atr*2.5); tp6 = price - (atr*4.0)
+            if timeframe == "5m": tp1 = price - 1.5; tp2 = price - 3.0; tp3 = price - 5.0; tp4 = price - (atr*1.0); tp5 = price - (atr*1.8); tp6 = price - (atr*3.0)
+       
+        title = "⚡ *TITAN AI LIVE-MARKT-ANALYSE* ⚡" if is_live_mode else f"🚨 *TITAN AI SETUP [{timeframe}]* 🚨"
 
         self.active_trade = {
             "direction": raw_dir,
             "entry": price,
             "sl": sl,
             "tps": [tp1, tp2, tp3, tp4, tp5, tp6],
-            "reached_tps": [False, False, False, False, False, False],
+            "reached_tps": [False]*6,
             "chat_id": self.last_active_chat_id
         }
 
@@ -265,87 +252,70 @@ class TitanAI_Analyst:
         report = (
             f"{title}\n\n"
             f"• *1H Makro-Trend:* `{macro_trend}`\n"
-            f"• *Struktur-Richtung:* `{direction}`\n"
-            f"• *Win-Wahrscheinlichkeit:* `{prob}%`\n"
-            f"• *Session & News-Status:* `{session_info}`\n\n"
-            f"• *Live-Entry:* `{price}`\n"
-            f"• *Stop-Loss:* `{sl:.2f}` (max. ~20 Pips Abstand)\n"
-            f"• *Risiko:* `{self.risk_percentage}%`\n\n"
-            f"🎯 *Take Profits & Management (TP1 - TP6):*\n"
-            f"• *TP1 (Break-Even):* `{tp1:.2f}`\n"
+            f"• *Richtung:* `{direction}`\n"
+            f"• *Win-Chance:* `{prob}%`\n"
+            f"• *Session:* `{session_info}`\n\n"
+            f"• *Entry:* `{price}`\n"
+            f"• *Stop-Loss:* `{sl:.2f}`\n\n"
+            f"🎯 *Take Profits (TP1-TP6):*\n"
+            f"• *TP1:* `{tp1:.2f}`\n"
             f"• *TP2:* `{tp2:.2f}`\n"
             f"• *TP3:* `{tp3:.2f}`\n"
             f"• *TP4:* `{tp4:.2f}`\n"
             f"• *TP5:* `{tp5:.2f}`\n"
-            f"• *🏆 Golden Profit (TP6):* `{tp6:.2f}`\n\n"
-            f"🛡️ *Multi-TP Tracker:* Aktiv (Überwacht TP1-TP6 im Hintergrund)."
+            f"• *TP6:* `{tp6:.2f}`\n\n"
+            f"⚠️ *Disclaimer:* Handel auf eigene Gefahr. Keine Anlageberatung."
         )
         return report, chart_bytes
 
     def handle_callback(self, callback_query):
+        global pending_signal
         query_id = callback_query.get("id")
         data = callback_query.get("data")
         user_id = callback_query.get("from", {}).get("id")
         chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
         self.last_active_chat_id = chat_id
 
-        # Hier deinen Admin User ID eintragen falls gewünscht
-        ADMIN_USER_ID = 8789124240
-
         answer_text = "Erfolgreich vermerkt!"
        
-        if data == "automate_trade":
-            # Automatisierungs-Button Fix: Sendet den Befehl direkt funktionsfähig raus
-            if self.active_trade:
-                answer_text = "🤖 Automatischer Handel für diesen Trade ausgelöst!"
-                trade = self.active_trade
-                exec_msg = (
-                    f"⚡ EXECUTE_TRADE ⚡\n"
-                    f"Richtung: {trade['direction']}\n"
-                    f"Entry: {trade['entry']}\n"
-                    f"Stop-Loss: {trade['sl']:.2f}\n"
-                    f"TP1: {trade['tps'][0]:.2f}"
-                )
-                # Sichert ab, dass es an den aktuellen Chat oder Listener Kanal geht
-                self.send_plain_message(exec_msg, str(chat_id))
+        if data in ["automate_live", "automate_pending"]:
+            if user_id != ADMIN_USER_ID:
+                answer_text = "⚠️ Zugriff verwehrt! Nur der Admin darf Trades automatisieren."
             else:
-                answer_text = "⚠️ Kein aktiver Trade im Speicher! Bitte erst z.B. '15m long' senden."
+                if self.active_trade:
+                    trade = self.active_trade
+                    order_type = "MARKET" if data == "automate_live" else "PENDING"
+                    pending_signal = {
+                        "direction": trade["direction"],
+                        "entry": trade["entry"],
+                        "sl": trade["sl"],
+                        "tp1": trade["tps"][0],
+                        "type": order_type
+                    }
+                    answer_text = f"🤖 Signal ({order_type}) an lokalen PC gesendet!"
+                    self.send_plain_message(f"⚡ **Automatisches Signal ({order_type}) generiert!**\nDer PC-Listener ruft die Order jetzt ab und trägt sie in MT5 ein.", str(chat_id))
+                else:
+                    answer_text = "⚠️ Kein aktiver Trade im Speicher!"
                
         elif data == "trade_open":
             self.journal["geöffnet"] += 1
-            answer_text = "Trade geöffnet. Multi-TP Tracker läuft!"
+            answer_text = "Trade geöffnet."
         elif data == "trade_win":
             self.journal["wins"] += 1
-            self.journal["total_pips"] += 30.0
             answer_text = "Win verbucht!"
             self.active_trade = None
         elif data == "trade_loss":
             self.journal["losses"] += 1
-            self.journal["total_pips"] -= 15.0
             answer_text = "Verlust verbucht."
             self.active_trade = None
         elif data == "trade_be":
-            answer_text = "🛡️ Break-Even vermerkt! Stopp auf Einstieg."
-        elif data == "trade_manual":
-            self.waiting_for_close_price[chat_id] = True
-            answer_text = "Bitte antworte jetzt im Chat mit deinem geschlossenen Exit-Preis."
+            answer_text = "🛡️ Break-Even vermerkt!"
         elif data == "show_stats":
-            self.send_stats_report(chat_id)
+            stats_msg = f"📊 *Journal*\nWins: `{self.journal['wins']}` | Losses: `{self.journal['losses']}`"
+            self.send_plain_message(stats_msg, chat_id)
 
-        try:
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                        json={"callback_query_id": query_id, "text": answer_text})
-        except:
-            pass
-
-    def send_stats_report(self, chat_id, title="📊 *Titan AI Tagesjournal*"):
-        stats_msg = (
-            f"{title}\n\n"
-            f"• Geöffnete Trades: `{self.journal['geöffnet']}`\n"
-            f"• Wins: `{self.journal['wins']}` | Losses: `{self.journal['losses']}`\n"
-            f"• Netto Pips / Punkte: `{self.journal['total_pips']:.1f}`"
-        )
-        self.send_plain_message(stats_msg, chat_id)
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": query_id, "text": answer_text})
 
     def background_trade_watcher(self):
         while True:
@@ -363,39 +333,10 @@ class TitanAI_Analyst:
                         if chat_id:
                             for i, tp_val in enumerate(tps):
                                 if not reached[i]:
-                                    hit = False
-                                    if direction == "LONG" and current_price >= tp_val:
-                                        hit = True
-                                    elif direction == "SHORT" and current_price <= tp_val:
-                                        hit = True
-
+                                    hit = (direction == "LONG" and current_price >= tp_val) or (direction == "SHORT" and current_price <= tp_val)
                                     if hit:
                                         reached[i] = True
-                                        tp_num = i + 1
-
-                                        if tp_num == 1:
-                                            alert_msg = (
-                                                f"🚀 *TITAN AI TRACKER: TP1 ERREICHT!* 🚀\n\n"
-                                                f"• Aktueller Kurs: `{current_price}`\n"
-                                                f"• Ziel TP1: `{tp_val:.2f}`\n\n"
-                                                f"🛡️ **Jetzt den Stop-Loss auf Break-Even (Entry bei `{trade['entry']}`) ziehen!**"
-                                            )
-                                        elif tp_num == 6:
-                                            alert_msg = (
-                                                f"🏆 *TITAN AI TRACKER: GOLDEN PROFIT (TP6) ERREICHT!* 🏆\n\n"
-                                                f"• Aktueller Kurs: `{current_price}`\n"
-                                                f"• Ziel TP6: `{tp_val:.2f}`\n\n"
-                                                f"💎 **Absolutes Maximum erreicht! Position komplett schließen oder restliche Gewinne sichern!**"
-                                            )
-                                        else:
-                                            alert_msg = (
-                                                f"🎯 *TITAN AI TRACKER: TP{tp_num} IM SACK!* 🎯\n\n"
-                                                f"• Aktueller Kurs: `{current_price}`\n"
-                                                f"• Ziel TP{tp_num}: `{tp_val:.2f}`\n\n"
-                                                f"📈 *Kurs läuft weiter Richtung nächste Ziele! Teilgewinne realisieren.*"
-                                            )
-
-                                        self.send_plain_message(alert_msg, str(chat_id))
+                                        self.send_plain_message(f"🎯 *TITAN AI TRACKER: TP{i+1} ERREICHT!* 🎯\nKurs: `{current_price}`", str(chat_id))
             except Exception:
                 pass
             time.sleep(15)
@@ -414,22 +355,13 @@ class TitanAI_Analyst:
                
                 if res.get("ok") and res.get("result"):
                     for update in res["result"]:
-                        update_id = update["update_id"]
-                        
-                        # Fix gegen doppelte Verarbeitung von Nachrichten
-                        if update_id in self.processed_update_ids:
-                            continue
-                        self.processed_update_ids.add(update_id)
-                        if len(self.processed_update_ids) > 1000:
-                            self.processed_update_ids.pop()
-
-                        self.last_update_id = update_id
+                        self.last_update_id = update["update_id"]
                        
                         if "callback_query" in update:
                             self.handle_callback(update["callback_query"])
                             continue
 
-                        msg = update.get("message") or update.get("channel_post") or {}
+                        msg = update.get("message") or {}
                         chat_id = msg.get("chat", {}).get("id")
                         text_cmd = msg.get("text", "").strip().lower()
                        
@@ -438,42 +370,29 @@ class TitanAI_Analyst:
                        
                         self.last_active_chat_id = chat_id
 
-                        if text_cmd in ["/start", "hallo", "hi", "start"]:
+                        if text_cmd in ["/start", "hallo", "hi", "start", "update info"]:
                             self.send_update_info(str(chat_id))
                             self.send_persistent_menu(str(chat_id))
                             continue
-                           
-                        if "update info" in text_cmd or text_cmd == "/update":
-                            self.send_update_info(str(chat_id))
-                            continue
 
-                        if chat_id in self.waiting_for_close_price and self.waiting_for_close_price[chat_id]:
-                            try:
-                                close_price = float(text_cmd.replace(",", "."))
-                                self.waiting_for_close_price[chat_id] = False
-                                self.journal["wins"] += 1
-                                self.journal["total_pips"] += 10.0
-                                self.send_plain_message(f"✅ Manueller Exit bei `{close_price}` erfasst!", str(chat_id))
-                                self.active_trade = None
-                            except ValueError:
-                                self.send_plain_message("⚠️ Bitte gib eine gültige Zahl ein.", str(chat_id))
-                            continue
-
-                        if text_cmd == "15m long":
+                        if "live markt-analyse" in text_cmd:
+                            setup, chart = self.analyze_market("5m", is_live_mode=True)
+                            self.send_message_with_buttons(setup, str(chat_id), chart, is_live=True)
+                        elif text_cmd == "15m long":
                             setup, chart = self.analyze_market("15m", "LONG")
-                            self.send_message_with_buttons(setup, str(chat_id), chart)
+                            self.send_message_with_buttons(setup, str(chat_id), chart, is_live=False)
                         elif text_cmd == "15m short":
                             setup, chart = self.analyze_market("15m", "SHORT")
-                            self.send_message_with_buttons(setup, str(chat_id), chart)
+                            self.send_message_with_buttons(setup, str(chat_id), chart, is_live=False)
                         elif text_cmd == "5m long":
                             setup, chart = self.analyze_market("5m", "LONG")
-                            self.send_message_with_buttons(setup, str(chat_id), chart)
+                            self.send_message_with_buttons(setup, str(chat_id), chart, is_live=False)
                         elif text_cmd == "5m short":
                             setup, chart = self.analyze_market("5m", "SHORT")
-                            self.send_message_with_buttons(setup, str(chat_id), chart)
+                            self.send_message_with_buttons(setup, str(chat_id), chart, is_live=False)
 
-            except Exception as e:
-                print(f"Fehler in Polling Loop: {e}")
+            except Exception:
+                pass
             time.sleep(2)
 
 if __name__ == "__main__":
@@ -488,4 +407,3 @@ if __name__ == "__main__":
 
     print("Alle Titan AI v3.0 Dienste aktiv...")
     analyst.listen()
-
